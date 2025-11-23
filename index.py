@@ -1,36 +1,66 @@
+import pandas as pd
 from pulp import *
+import matplotlib.pyplot as plt
+import os
+from sklearn.metrics.pairwise import euclidean_distances
+import numpy as np
 
-# --- 1. DEFINE DATA (MODEL PARAMETERS) ---
+print("Loading data from CSVs...")
+try:
+    # Load data from CSVs
+    fac_df = pd.read_csv('data/facilities.csv')
+    cust_df = pd.read_csv('data/customers.csv')
+except FileNotFoundError:
+    print("Error: Make sure 'facilities.csv' and 'customers.csv' are in the same directory.")
+    exit()
+    
+# Set the facility/customer IDs as the index for easy lookup
+fac_df = fac_df.set_index('facility_id')
+cust_df = cust_df.set_index('customer_id')
 
-# A list of potential facility sites
-facilities = ["DC1", "DC2", "DC3"]
+print(fac_df.head())
+print(cust_df.head())
+# Get lists of facilities and customers
+facilities = fac_df.index.tolist()
+customers = cust_df.index.tolist()
 
-# A list of customer regions
-customers = ["Cust1", "Cust2", "Cust3", "Cust4"]
+print(facilities)
+print(customers)
 
-# Fixed cost to build/operate a facility at each site
-fixed_costs = {"DC1": 10000, 
-               "DC2": 12000, 
-               "DC3": 9000}
+# Convert data to dictionaries (which PuLP expects)
+fixed_costs = fac_df['fixed_cost'].to_dict()
+capacities = fac_df['capacity'].to_dict()
+demands = cust_df['demand'].to_dict()
 
-# Maximum capacity of each potential facility
-capacities = {"DC1": 500, 
-              "DC2": 500, 
-              "DC3": 500}
+print(fixed_costs)
+print(capacities)
+print(demands)
 
-# Annual demand from each customer
-demands = {"Cust1": 200, 
-           "Cust2": 150, 
-           "Cust3": 300,
-           "Cust4": 100}
+# --- 2. CALCULATE TRANSPORT COSTS ---
 
-# Variable transportation cost (per unit) from facility i to customer j
-# Using a nested dictionary: transport_costs[i][j]
-transport_costs = {
-    "DC1": {"Cust1": 4, "Cust2": 6, "Cust3": 9, "Cust4": 5},
-    "DC2": {"Cust1": 6, "Cust2": 4, "Cust3": 7, "Cust4": 8},
-    "DC3": {"Cust1": 8, "Cust2": 3, "Cust3": 5, "Cust4": 4},
-}
+# Get (x, y) coordinates into numpy arrays
+fac_coords = fac_df[['x', 'y']].values
+cust_coords = cust_df[['x', 'y']].values
+
+print(fac_coords)
+print(cust_coords)
+
+# Calculate Euclidean distance matrix
+dist_matrix = euclidean_distances(fac_coords, cust_coords)
+print(dist_matrix)
+
+# Define a cost per unit of distance
+# You can change this factor to see how it impacts the solution
+COST_PER_DISTANCE_UNIT = 1.2
+
+# Create the transport_costs dictionary
+transport_costs = {}
+for i_idx, i in enumerate(facilities):
+    transport_costs[i] = {}
+    for j_idx, j in enumerate(customers):
+        transport_costs[i][j] = dist_matrix[i_idx, j_idx] * COST_PER_DISTANCE_UNIT
+
+print("Data loaded and transport costs calculated.")
 
 # --- 2. INITIALIZE THE MODEL ---
 model = LpProblem(name="FacilityLocationProblem", sense=LpMinimize)
@@ -89,3 +119,40 @@ for i in facilities:
         # Only print shipments that are actually happening (quantity > 0)
         if ship_quantity[i][j].varValue > 0:
             print(f"  - Ship {ship_quantity[i][j].varValue:,.0f} units from {i} to {j}")
+            
+print("\nGenerating visualization...")
+plt.figure(figsize=(12, 8))
+
+# Plot customers
+plt.scatter(cust_df['x'], cust_df['y'], c='blue', marker='o', label='Customers')
+for j in customers:
+    plt.text(cust_df.loc[j, 'x'] + 1, cust_df.loc[j, 'y'], j)
+
+# Plot potential facility sites
+plt.scatter(fac_df['x'], fac_df['y'], c='red', marker='x', s=100, label='Potential Sites')
+
+# Plot opened facilities and shipping routes
+for i in facilities:
+    if use_facility[i].varValue == 1:
+        # Plot the opened facility with a green star
+        plt.scatter(fac_df.loc[i, 'x'], fac_df.loc[i, 'y'], c='green', marker='*', s=200, 
+                    label=f'Opened Site: {i}')
+        plt.text(fac_df.loc[i, 'x'] + 1, fac_df.loc[i, 'y'], i)
+        
+        # Plot shipping routes
+        for j in customers:
+            if ship_quantity[i][j].varValue > 0:
+                # Get coordinates for the line
+                x1, y1 = fac_df.loc[i, 'x'], fac_df.loc[i, 'y']
+                x2, y2 = cust_df.loc[j, 'x'], cust_df.loc[j, 'y']
+                plt.plot([x1, x2], [y1, y2], c='gray', linestyle='--', alpha=0.7)
+
+plt.title('Optimal Facility Location and Shipping Routes')
+plt.xlabel('X-Coordinate')
+plt.ylabel('Y-Coordinate')
+plt.legend(loc='upper left')
+plt.grid(True)
+OUTPUT_IMAGE_PATH = os.path.join('docs', 'images', 'solution.png')
+os.makedirs(os.path.dirname(OUTPUT_IMAGE_PATH), exist_ok=True)
+plt.savefig(OUTPUT_IMAGE_PATH, bbox_inches="tight", dpi=300)
+plt.show()

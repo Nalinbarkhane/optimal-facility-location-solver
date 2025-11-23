@@ -1,0 +1,8 @@
+customer_id,x,y,demand
+Cust1,10,15,120
+Cust2,30,40,150
+Cust3,50,60,200
+Cust4,80,90,180
+Cust5,90,10,100
+Cust6,25,65,130
+Cust7,60,75,110
